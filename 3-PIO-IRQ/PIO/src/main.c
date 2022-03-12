@@ -45,12 +45,13 @@
 /************************************************************************/
 /* variaveis globais                                                    */
 /************************************************************************/
-
+volatile char but_flag;
 /************************************************************************/
 /* prototype                                                            */
 /************************************************************************/
 void io_init(void);
-void pisca_led(int n, int t);
+void pisca_led(int t);
+void but_callback(void);
 
 /************************************************************************/
 /* handler / callbacks                                                  */
@@ -62,10 +63,22 @@ void pisca_led(int n, int t);
  *
  * !! Isso é um exemplo ruim, nao deve ser feito na pratica, !!
  * !! pois nao se deve usar delays dentro de interrupcoes    !!
+ 
+ --> resolvido ao longo do lab:
+ --> A função de callback apenas altera a flag (volatile char but_flag). 
+ --> Quem lida com mudanças na flag será o main
  */
 void but_callback(void)
 {
-  pisca_led(5, 200);
+	if (pio_get(BUT_PIO, PIO_INPUT, BUT_IDX_MASK)) {
+		// PINO == 1 --> Soltou o botão
+		but_flag = 0;
+	
+	} else {
+		// PINO == 0 --> Apertou o botão
+		but_flag = 1;
+	}
+  
 }
 
 /************************************************************************/
@@ -73,13 +86,11 @@ void but_callback(void)
 /************************************************************************/
 
 // pisca led N vez no periodo T
-void pisca_led(int n, int t){
-  for (int i=0;i<n;i++){
+void pisca_led(int t){
     pio_clear(LED_PIO, LED_IDX_MASK);
     delay_ms(t);
     pio_set(LED_PIO, LED_IDX_MASK);
     delay_ms(t);
-  }
 }
 
 // Inicializa botao SW0 do kit com interrupcao
@@ -94,8 +105,11 @@ void io_init(void)
 	pmc_enable_periph_clk(BUT_PIO_ID);
 
   // Configura PIO para lidar com o pino do botão como entrada
-  // com pull-up
-	pio_configure(BUT_PIO, PIO_INPUT, BUT_IDX_MASK, PIO_PULLUP);
+  // Ajusta as configurações do pino: debounce + pull-up
+	pio_configure(BUT_PIO, PIO_INPUT, BUT_IDX_MASK, PIO_DEBOUNCE | PIO_PULLUP);
+	
+  // Configura as particularidades do debounce para o PIO do botão
+	pio_set_debounce_filter(BUT_PIO, BUT_IDX_MASK, 60);
 
   // Configura interrupção no pino referente ao botao e associa
   // função de callback caso uma interrupção for gerada
@@ -103,8 +117,9 @@ void io_init(void)
   pio_handler_set(BUT_PIO,
                   BUT_PIO_ID,
                   BUT_IDX_MASK,
-                  PIO_IT_FALL_EDGE,
+                  PIO_IT_EDGE,	
                   but_callback);
+				  // adiciona o but_callback para eventos de fall-edge e high-edge
 
   // Ativa interrupção e limpa primeira IRQ gerada na ativacao
   pio_enable_interrupt(BUT_PIO, BUT_IDX_MASK);
@@ -136,5 +151,11 @@ void main(void)
 	// aplicacoes embarcadas no devem sair do while(1).
 	while(1)
   {
+	  while(but_flag) {
+		  pisca_led(100);
+	  }
+	  
+	  // Entra em sleep mode
+	  pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
 	}
 }
