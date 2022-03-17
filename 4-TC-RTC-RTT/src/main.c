@@ -63,7 +63,8 @@
 /* PROTOTYPES                                                           */
 /************************************************************************/
 
-void LED_init(Pio *pio, uint32_t ul_led_id, uint32_t ul_led_mask, int initial_state);
+void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state);
+void pisca_led(Pio *pio, uint32_t led_mask);
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq);
 void pin_toggle(Pio *pio, uint32_t mask);
 
@@ -79,6 +80,15 @@ void pin_toggle(Pio *pio, uint32_t mask);
 void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state) {
 	pmc_enable_periph_clk(led_id);
 	pio_set_output(pio, led_mask, initial_state, 0,0);
+}
+
+void pisca_led(Pio *pio, uint32_t led_mask) {
+	// Altera o status do LED de 0 p/ 1 e vice-versa.
+	if (pio_get_output_data_status(pio, led_mask)) {
+		pio_clear(pio, led_mask);
+	} else {
+		pio_set(pio, led_mask);
+	}
 }
 
 
