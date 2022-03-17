@@ -55,9 +55,21 @@
 #define LED3_PIO_IDX	2
 #define LED3_PIO_IDX_MASK (1u << LED3_PIO_IDX)
 
+typedef struct  {
+	uint32_t year;
+	uint32_t month;
+	uint32_t day;
+	uint32_t week;
+	uint32_t hour;
+	uint32_t minute;
+	uint32_t second;
+} calendar;
+
 /************************************************************************/
 /* VAR globais                                                          */
 /************************************************************************/
+volatile char flag_rtc_alarm = 0;
+
 
 /************************************************************************/
 /* PROTOTYPES                                                           */
@@ -68,6 +80,7 @@ void pisca_led(Pio *pio, uint32_t led_mask);
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq);
 static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
+void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type);
 
 /************************************************************************/
 /* Handlers                                                             */
@@ -99,6 +112,30 @@ void RTT_Handler(void) {
 		pisca_led(LED2_PIO, LED2_PIO_IDX_MASK);    // BLINK Led
 	}
 
+}
+
+void RTC_Handler(void) {
+	uint32_t ul_status = rtc_get_status(RTC);
+	
+	/* seccond tick */
+	if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
+		// o código para irq de segundo vem aqui
+		
+		// Por enqnt, não vamos utilizar
+	}
+	
+	/* Time or date alarm */
+	if ((ul_status & RTC_SR_ALARM) == RTC_SR_ALARM) {
+		// Ativa flag de resultado do alarme
+		flag_rtc_alarm = 1;
+	}
+
+	rtc_clear_status(RTC, RTC_SCCR_SECCLR);
+	rtc_clear_status(RTC, RTC_SCCR_ALRCLR);
+	rtc_clear_status(RTC, RTC_SCCR_ACKCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TIMCLR);
+	rtc_clear_status(RTC, RTC_SCCR_CALCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);
 }
 
 
@@ -166,6 +203,26 @@ static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSou
 	
 }
 
+void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type) {
+	/* Configura o PMC */
+	pmc_enable_periph_clk(ID_RTC);
+
+	/* Default RTC configuration, 24-hour mode */
+	rtc_set_hour_mode(rtc, 0);
+
+	/* Configura data e hora manualmente */
+	rtc_set_date(rtc, t.year, t.month, t.day, t.week);
+	rtc_set_time(rtc, t.hour, t.minute, t.second);
+
+	/* Configure RTC interrupts */
+	NVIC_DisableIRQ(id_rtc);
+	NVIC_ClearPendingIRQ(id_rtc);
+	NVIC_SetPriority(id_rtc, 4);
+	NVIC_EnableIRQ(id_rtc);
+
+	/* Ativa interrupcao via alarme */
+	rtc_enable_interrupt(rtc,  irq_type);
+}
 
 
 /************************************************************************/
@@ -194,10 +251,24 @@ int main (void)
 	// Inicializa RTT como incrementador com freq = 0.25 hz
 	RTT_init(0.25, 0, RTT_MR_RTTINCIEN);
 	
+	// Configura calendário para utilizar no RTC:
+	calendar rtc_initial = {2022, 3, 17, 20, 45, 32};
+	RTC_init(RTC, ID_RTC, rtc_initial, RTC_IER_ALREN);
+	
+	// Leitura dos valores atuais do RTC:
+	uint32_t current_hour, current_min, current_sec;
+	uint32_t current_year, current_month, current_day, current_week;
+	rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+	rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+	
+	// Configura alarme do RTC para +20seg.
+	rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
+	rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 20);
+		
 	
 	while(1) {
-
-			
+	// if flag_btn1: --> Aciona flag_rtc_alarm => Seta alarme para t+20seg
+	
 			
 	}
 }
