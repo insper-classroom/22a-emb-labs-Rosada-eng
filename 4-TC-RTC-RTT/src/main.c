@@ -65,13 +65,23 @@
 
 void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state);
 void pisca_led(Pio *pio, uint32_t led_mask);
-void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq);
+
+void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq);
 void pin_toggle(Pio *pio, uint32_t mask);
 
 /************************************************************************/
 /* Handlers                                                             */
 /************************************************************************/
+void TC1_Handler(void) {
+	/**
+	* Devemos indicar ao TC que a interrupção foi satisfeita.
+	* Isso é realizado pela leitura do status do periférico
+	**/
+	volatile uint32_t status = tc_get_status(TC0, 1);
 
+	/** Muda o estado do LED (pisca) **/
+	pisca_led(LED1_PIO, LED1_PIO_IDX_MASK);  
+}
 
 
 /************************************************************************/
@@ -91,6 +101,25 @@ void pisca_led(Pio *pio, uint32_t led_mask) {
 	}
 }
 
+void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq){
+	uint32_t ul_div;
+	uint32_t ul_tcclks;
+	uint32_t ul_sysclk = sysclk_get_cpu_hz();
+
+	/* Configura o PMC */
+	pmc_enable_periph_clk(ID_TC);
+
+	/** Configura o TC para operar em  freq hz e interrupçcão no RC compare */
+	tc_find_mck_divisor(freq, ul_sysclk, &ul_div, &ul_tcclks, ul_sysclk);
+	tc_init(TC, TC_CHANNEL, ul_tcclks | TC_CMR_CPCTRG);
+	tc_write_rc(TC, TC_CHANNEL, (ul_sysclk / ul_div) / freq);
+
+	/* Configura NVIC*/
+	NVIC_SetPriority(ID_TC, prioridade_irq);
+	NVIC_EnableIRQ((IRQn_Type) ID_TC);
+	tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
+}
+
 
 /************************************************************************/
 /* Main Code	                                                        */
@@ -105,9 +134,16 @@ int main (void)
 	//gfx_mono_draw_filled_circle(20, 16, 16, GFX_PIXEL_SET, GFX_WHOLE);
 	//gfx_mono_draw_string("mundo", 50,16, &sysfont);
   
+	// Configura LED como OUTPUT e estado inicial como OFF
 	LED_init(LED1_PIO, LED1_PIO_ID, LED1_PIO_IDX_MASK, 1);
 	LED_init(LED2_PIO, LED2_PIO_ID, LED2_PIO_IDX_MASK, 1);
 	LED_init(LED3_PIO, LED3_PIO_ID, LED3_PIO_IDX_MASK, 1);
+	
+	// Inicializa Timer TC0, canal 1
+	TC_init(TC0, ID_TC1, 1, 4, 4);
+	// Inicializa contagem do TC0 no canal 1
+	tc_start(TC0, 1);
+	
 	
 	while(1) {
 
