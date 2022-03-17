@@ -67,7 +67,7 @@ void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state);
 void pisca_led(Pio *pio, uint32_t led_mask);
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq);
-void pin_toggle(Pio *pio, uint32_t mask);
+static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
 
 /************************************************************************/
 /* Handlers                                                             */
@@ -81,6 +81,24 @@ void TC1_Handler(void) {
 
 	/** Muda o estado do LED (pisca) **/
 	pisca_led(LED1_PIO, LED1_PIO_IDX_MASK);  
+}
+
+void RTT_Handler(void) {
+	uint32_t ul_status;
+
+	/* Get RTT status - ACK */
+	ul_status = rtt_get_status(RTT);
+
+	/* IRQ due to Alarm */
+	if ((ul_status & RTT_SR_ALMS) == RTT_SR_ALMS) {
+		RTT_init(0.25, 0, RTT_MR_RTTINCIEN);
+	}
+	
+	/* IRQ due to Time has changed */
+	if ((ul_status & RTT_SR_RTTINC) == RTT_SR_RTTINC) {
+		pisca_led(LED2_PIO, LED2_PIO_IDX_MASK);    // BLINK Led
+	}
+
 }
 
 
@@ -120,6 +138,35 @@ void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq){
 	tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
 }
 
+static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource) {
+
+	uint16_t pllPreScale = (int) (((float) 32768) / freqPrescale);
+	
+	rtt_sel_source(RTT, false);
+	rtt_init(RTT, pllPreScale);
+	
+	if (rttIRQSource & RTT_MR_ALMIEN) {
+		uint32_t ul_previous_time;
+		ul_previous_time = rtt_read_timer_value(RTT);
+		while (ul_previous_time == rtt_read_timer_value(RTT));
+		rtt_write_alarm_time(RTT, IrqNPulses+ul_previous_time);
+	}
+
+	/* config NVIC */
+	NVIC_DisableIRQ(RTT_IRQn);
+	NVIC_ClearPendingIRQ(RTT_IRQn);
+	NVIC_SetPriority(RTT_IRQn, 4);
+	NVIC_EnableIRQ(RTT_IRQn);
+
+	/* Enable RTT interrupt */
+	if (rttIRQSource & (RTT_MR_RTTINCIEN | RTT_MR_ALMIEN))
+	rtt_enable_interrupt(RTT, rttIRQSource);
+	else
+	rtt_disable_interrupt(RTT, RTT_MR_RTTINCIEN | RTT_MR_ALMIEN);
+	
+}
+
+
 
 /************************************************************************/
 /* Main Code	                                                        */
@@ -140,9 +187,12 @@ int main (void)
 	LED_init(LED3_PIO, LED3_PIO_ID, LED3_PIO_IDX_MASK, 1);
 	
 	// Inicializa Timer TC0, canal 1
-	TC_init(TC0, ID_TC1, 1, 4, 4);
 	// Inicializa contagem do TC0 no canal 1
+	TC_init(TC0, ID_TC1, 1, 4, 4);
 	tc_start(TC0, 1);
+	
+	// Inicializa RTT como incrementador com freq = 0.25 hz
+	RTT_init(0.25, 0, RTT_MR_RTTINCIEN);
 	
 	
 	while(1) {
