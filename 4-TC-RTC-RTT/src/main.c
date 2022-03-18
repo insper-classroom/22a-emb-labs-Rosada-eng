@@ -69,9 +69,13 @@ typedef struct  {
 /* VAR globais                                                          */
 /************************************************************************/
 volatile char btn1_flag = 0;			// Flag do botão 1 --> seta o alarme e abaixa flag
-volatile char flag_rtc_alarm = 0;		// Flag do alarme  --> Faz o LED piscar por 10seg e abaixa flag
+volatile char rtc_alarm_flag = 0;		// Flag do alarme  --> Faz o LED piscar por 10seg e abaixa flag
+volatile char increment_sec_flag = 0;		// Flag do alarme, ativada a cada 1 seg --> incrementa calendar.seg
 
+uint32_t current_hour, current_min, current_sec;
+uint32_t current_year, current_month, current_day, current_week;
 
+char display[8];
 /************************************************************************/
 /* PROTOTYPES                                                           */
 /************************************************************************/
@@ -81,6 +85,7 @@ void BTN_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask);
 void BTN_interrupt_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask, int prioridade); 
 
 void pisca_led(Pio *pio, uint32_t led_mask);
+void show_clock_on_display(int x, int y);
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq);
 static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
@@ -130,14 +135,14 @@ void RTC_Handler(void) {
 	/* seccond tick */
 	if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
 		// o código para irq de segundo vem aqui
+		increment_sec_flag = 1;
 		
-		// Por enqnt, não vamos utilizar
 	}
 	
 	/* Time or date alarm */
 	if ((ul_status & RTC_SR_ALARM) == RTC_SR_ALARM) {
 		// Ativa flag de resultado do alarme
-		flag_rtc_alarm = 1;
+		rtc_alarm_flag = 1;
 	}
 
 	rtc_clear_status(RTC, RTC_SCCR_SECCLR);
@@ -176,6 +181,11 @@ void pisca_led(Pio *pio, uint32_t led_mask) {
 	} else {
 		pio_set(pio, led_mask);
 	}
+}
+
+void show_clock_on_display(int x, int y) {
+	sprintf(display, "%02lu:%02lu:%02lu", current_hour, current_min, current_sec);
+	gfx_mono_draw_string(display, x, y, &sysfont);
 }
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq){
@@ -239,7 +249,7 @@ void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type) {
 	/* Configure RTC interrupts */
 	NVIC_DisableIRQ(id_rtc);
 	NVIC_ClearPendingIRQ(id_rtc);
-	NVIC_SetPriority(id_rtc, 4);
+	NVIC_SetPriority(id_rtc, 3);
 	NVIC_EnableIRQ(id_rtc);
 
 	/* Ativa interrupcao via alarme */
@@ -255,10 +265,12 @@ int main (void)
 	board_init();
 	sysclk_init();
 	delay_init();
-	
-	//gfx_mono_ssd1306_init();
-	//gfx_mono_draw_filled_circle(20, 16, 16, GFX_PIXEL_SET, GFX_WHOLE);
-	//gfx_mono_draw_string("mundo", 50,16, &sysfont);
+
+	  // Init OLED
+	  gfx_mono_ssd1306_init();
+	  //gfx_mono_draw_filled_circle(20, 16, 16, GFX_PIXEL_SET, GFX_WHOLE);
+	  //gfx_mono_draw_string("ble", 50,16, &sysfont);
+
   
 	// Configura LED como OUTPUT e estado inicial como OFF
 	LED_init(LED1_PIO, LED1_PIO_ID, LED1_PIO_IDX_MASK, 1);
@@ -284,9 +296,13 @@ int main (void)
 	// Inicializa RTT como incrementador com freq = 0.25 hz
 	RTT_init(0.25, 0, RTT_MR_RTTINCIEN);
 	
-	// Configura calendário para utilizar no RTC:
+	// Inicialia variáveis de calendário para utilizar no RTC:
+	// Leitura dos valores atuais do RTC:
+	rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+	rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+	// configura RTC como alarme e como interrupção a cada SEG
 	calendar rtc_initial = {2022, 3, 17, 20, 45, 32};
-	RTC_init(RTC, ID_RTC, rtc_initial, RTC_IER_ALREN);
+	RTC_init(RTC, ID_RTC, rtc_initial, RTC_IER_ALREN | RTC_IER_SECEN);
 	
 
 	
@@ -294,14 +310,12 @@ int main (void)
 		
 	
 	while(1) {
-	// if flag_btn1: --> Aciona flag_rtc_alarm => Seta alarme para t+20seg
-	if (btn1_flag) {
-		// Leitura dos valores atuais do RTC:
-		uint32_t current_hour, current_min, current_sec;
-		uint32_t current_year, current_month, current_day, current_week;
-		rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
-		rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
 		
+		
+	// if flag_btn1: --> Aciona rtc_alarm_flag => Seta alarme para t+20seg
+	if (btn1_flag) {
+		
+		rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
 		// Configura alarme do RTC para +20seg.
 		rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
 		rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 5);
@@ -310,12 +324,40 @@ int main (void)
 		btn1_flag = 0;
 	}
 	
-	if (flag_rtc_alarm) {
+	if (rtc_alarm_flag) {
+		rtc_alarm_flag = 0;
 		for (int i=0; i<100; i++) {
 			pisca_led(LED3_PIO, LED3_PIO_IDX_MASK);
 			delay_ms(100);
-		}
-		flag_rtc_alarm = 0;
+			}
+		
 	}
+	
+	if (increment_sec_flag) {
+		current_sec += 1;
+		if (current_sec == 60) {
+			current_min += 1;
+			current_sec = 0;
+		}
+		if (current_min == 60) {
+			current_hour += 1;
+			current_min = 0;
+		}
+		if (current_hour == 24) {
+			current_day += 1;
+			current_hour = 0;
+		}
+		increment_sec_flag = 0;
+	}
+	
+	
+	
+
+	
+	// show clock on display
+	show_clock_on_display(20, 5);
+	//gfx_mono_draw_string("BLEU", 10,0, &sysfont);
+	//pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
+	
 	}
 }
