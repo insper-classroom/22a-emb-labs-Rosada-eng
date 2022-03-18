@@ -71,6 +71,8 @@ typedef struct  {
 volatile char btn1_flag = 0;			// Flag do botão 1 --> seta o alarme e abaixa flag
 volatile char rtc_alarm_flag = 0;		// Flag do alarme  --> Faz o LED piscar por 10seg e abaixa flag
 volatile char increment_sec_flag = 0;		// Flag do alarme, ativada a cada 1 seg --> incrementa calendar.seg
+volatile char tc_counter_flag = 0;	// Flag que ativa o contador
+volatile int N_tc_counter = 0;		// Contador de interrupções do TC2 p/ atingir 20 seg (freq=4 Hz --> N = 20 * 4)
 
 uint32_t current_hour, current_min, current_sec;
 uint32_t current_year, current_month, current_day, current_week;
@@ -105,6 +107,12 @@ void TC1_Handler(void) {
 
 	/** Muda o estado do LED (pisca) **/
 	pisca_led(LED1_PIO, LED1_PIO_IDX_MASK);  
+}
+
+void TC2_Handler(void) {
+	volatile uint32_t status = tc_get_status(TC0, 2);
+	
+	tc_counter_flag = 1;
 }
 
 void RTT_Handler(void) {
@@ -315,18 +323,34 @@ int main (void)
 	// if flag_btn1: --> Aciona rtc_alarm_flag => Seta alarme para t+20seg
 	if (btn1_flag) {
 		
-		rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
-		// Configura alarme do RTC para +20seg.
-		rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
-		if (current_sec + 20 >= 60) {
-			rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min +1, 1, current_sec + 20 -60);
-		} else {
-			rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 20);
-		}
+		// CONCEITO A: -> substitui RTC por um TC:
+		// Inicia TC0 no canal 2
+		TC_init(TC0, ID_TC2, 2, 4, 4);
+		tc_start(TC0, 2);
+		
+		//rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+		//// Configura alarme do RTC para +20seg.
+		//rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
+		//if (current_sec + 20 >= 60) {
+			//rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min +1, 1, current_sec + 20 -60);
+		//} else {
+			//rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 20);
+		//}
 		
 		
 		// Abaixa flag
 		btn1_flag = 0;
+	}
+	
+	if (tc_counter_flag) {
+		N_tc_counter += 1;
+		tc_counter_flag = 0;
+		
+		if (N_tc_counter >= 4 * 5) {
+			tc_disable_interrupt(TC0, 2, TC_IDR_CPCS);
+			rtc_alarm_flag =1;
+		}
+		
 	}
 	
 	if (rtc_alarm_flag) {
