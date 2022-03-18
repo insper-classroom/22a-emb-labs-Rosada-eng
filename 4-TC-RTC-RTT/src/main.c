@@ -346,8 +346,9 @@ int main (void)
 		N_tc_counter += 1;
 		tc_counter_flag = 0;
 		
-		if (N_tc_counter >= 4 * 5) {
+		if (N_tc_counter >= 4 * 20) {
 			tc_disable_interrupt(TC0, 2, TC_IDR_CPCS);
+			N_tc_counter = 0;
 			rtc_alarm_flag =1;
 		}
 		
@@ -381,7 +382,7 @@ int main (void)
 	
 	// show clock on display
 	show_clock_on_display(30, 10);
-	//pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
+	pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
 	
 	}
 }
