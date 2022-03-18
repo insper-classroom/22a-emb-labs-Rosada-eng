@@ -68,7 +68,8 @@ typedef struct  {
 /************************************************************************/
 /* VAR globais                                                          */
 /************************************************************************/
-volatile char flag_rtc_alarm = 0;
+volatile char btn1_flag = 0;			// Flag do botão 1 --> seta o alarme e abaixa flag
+volatile char flag_rtc_alarm = 0;		// Flag do alarme  --> Faz o LED piscar por 10seg e abaixa flag
 
 
 /************************************************************************/
@@ -76,14 +77,19 @@ volatile char flag_rtc_alarm = 0;
 /************************************************************************/
 
 void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state);
+void BTN_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask);
+void BTN_interrupt_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask, int prioridade); 
+
 void pisca_led(Pio *pio, uint32_t led_mask);
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq, int prioridade_irq);
 static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
 void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type);
 
+void btn1_callback(void);
+
 /************************************************************************/
-/* Handlers                                                             */
+/* Handlers && Callbacks                                                */
 /************************************************************************/
 void TC1_Handler(void) {
 	/**
@@ -112,6 +118,10 @@ void RTT_Handler(void) {
 		pisca_led(LED2_PIO, LED2_PIO_IDX_MASK);    // BLINK Led
 	}
 
+}
+
+void btn1_callback(void) {
+	btn1_flag = 1;
 }
 
 void RTC_Handler(void) {
@@ -145,6 +155,18 @@ void RTC_Handler(void) {
 void LED_init(Pio *pio, uint32_t led_id, uint32_t led_mask, int initial_state) {
 	pmc_enable_periph_clk(led_id);
 	pio_set_output(pio, led_mask, initial_state, 0,0);
+}
+
+void BTN_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask) {
+	pmc_enable_periph_clk(btn_id);
+	pio_set_input(pio, btn_mask, PIO_PULLUP | PIO_DEBOUNCE);
+	pio_set_debounce_filter(pio, btn_mask, 60);
+}
+
+void BTN_interrupt_init(Pio *pio, uint32_t btn_id, uint32_t btn_mask, int prioridade) {
+	pio_enable_interrupt(pio, btn_mask);
+	NVIC_EnableIRQ(btn_id);
+	NVIC_SetPriority(btn_id, prioridade);
 }
 
 void pisca_led(Pio *pio, uint32_t led_mask) {
@@ -243,6 +265,17 @@ int main (void)
 	LED_init(LED2_PIO, LED2_PIO_ID, LED2_PIO_IDX_MASK, 1);
 	LED_init(LED3_PIO, LED3_PIO_ID, LED3_PIO_IDX_MASK, 1);
 	
+	// Configura BTN 1 como Input
+	// Configura interrupção no BTN 1
+	BTN_init(BTN1_PIO, BTN1_PIO_ID, BTN1_PIO_IDX_MASK);
+	BTN_interrupt_init(BTN1_PIO, BTN1_PIO_ID, BTN1_PIO_IDX_MASK, 4);
+	pio_handler_set(
+		BTN1_PIO,
+		BTN1_PIO_ID,
+		BTN1_PIO_IDX_MASK,
+		PIO_IT_FALL_EDGE,
+		btn1_callback);
+	
 	// Inicializa Timer TC0, canal 1
 	// Inicializa contagem do TC0 no canal 1
 	TC_init(TC0, ID_TC1, 1, 4, 4);
@@ -255,20 +288,34 @@ int main (void)
 	calendar rtc_initial = {2022, 3, 17, 20, 45, 32};
 	RTC_init(RTC, ID_RTC, rtc_initial, RTC_IER_ALREN);
 	
-	// Leitura dos valores atuais do RTC:
-	uint32_t current_hour, current_min, current_sec;
-	uint32_t current_year, current_month, current_day, current_week;
-	rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
-	rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+
 	
-	// Configura alarme do RTC para +20seg.
-	rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
-	rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 20);
+	
 		
 	
 	while(1) {
 	// if flag_btn1: --> Aciona flag_rtc_alarm => Seta alarme para t+20seg
+	if (btn1_flag) {
+		// Leitura dos valores atuais do RTC:
+		uint32_t current_hour, current_min, current_sec;
+		uint32_t current_year, current_month, current_day, current_week;
+		rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+		rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+		
+		// Configura alarme do RTC para +20seg.
+		rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
+		rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 5);
+		
+		// Abaixa flag
+		btn1_flag = 0;
+	}
 	
-			
+	if (flag_rtc_alarm) {
+		for (int i=0; i<100; i++) {
+			pisca_led(LED3_PIO, LED3_PIO_IDX_MASK);
+			delay_ms(100);
+		}
+		flag_rtc_alarm = 0;
+	}
 	}
 }
