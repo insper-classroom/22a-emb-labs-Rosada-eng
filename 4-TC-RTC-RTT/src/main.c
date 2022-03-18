@@ -249,7 +249,7 @@ void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type) {
 	/* Configure RTC interrupts */
 	NVIC_DisableIRQ(id_rtc);
 	NVIC_ClearPendingIRQ(id_rtc);
-	NVIC_SetPriority(id_rtc, 3);
+	NVIC_SetPriority(id_rtc, 1);
 	NVIC_EnableIRQ(id_rtc);
 
 	/* Ativa interrupcao via alarme */
@@ -318,7 +318,12 @@ int main (void)
 		rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
 		// Configura alarme do RTC para +20seg.
 		rtc_set_date_alarm(RTC, 1, current_month, 1, current_day);
-		rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 5);
+		if (current_sec + 20 >= 60) {
+			rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min +1, 1, current_sec + 20 -60);
+		} else {
+			rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min, 1, current_sec + 20);
+		}
+		
 		
 		// Abaixa flag
 		btn1_flag = 0;
@@ -350,13 +355,8 @@ int main (void)
 		increment_sec_flag = 0;
 	}
 	
-	
-	
-
-	
 	// show clock on display
-	show_clock_on_display(20, 5);
-	//gfx_mono_draw_string("BLEU", 10,0, &sysfont);
+	show_clock_on_display(30, 10);
 	//pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
 	
 	}
