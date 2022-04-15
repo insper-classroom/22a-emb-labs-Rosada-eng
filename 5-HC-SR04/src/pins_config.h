@@ -1,14 +1,24 @@
 #ifndef pins_config
 #define pins_config
 
-// Número de Músicas adicionadas
-#define NUMBER_OF_SONGS 3
+// ECHO (X) -- fio laranja (PA13)
+#define ECHO_PIO			PIOA
+#define ECHO_PIO_ID			ID_PIOA
+#define ECHO_PIO_IDX		13
+#define ECHO_PIO_IDX_MASK	(1u << ECHO_PIO_IDX)
+
+
+// TRIGGER (Y) -- fio amarelo (PC19)
+#define TRIGGER_PIO			PIOC
+#define TRIGGER_PIO_ID		ID_PIOC
+#define TRIGGER_PIO_IDX		19
+#define TRIGGER_PIO_IDX_MASK (1u << TRIGGER_PIO_IDX)
 
 // LED
 #define LED_PIO      PIOC
 #define LED_PIO_ID   ID_PIOC
-#define LED_IDX      8
-#define LED_IDX_MASK (1 << LED_IDX)
+#define LED_PIO_IDX      8
+#define LED_PIO_IDX_MASK (1 << LED_PIO_IDX)
 
 // BUT
 #define BUT_PIO		PIOA
@@ -51,12 +61,6 @@
 #define LED3_PIO_ID		ID_PIOB
 #define LED3_PIO_IDX	2
 #define LED3_PIO_IDX_MASK (1u << LED3_PIO_IDX)
-
-// BUZZ
-#define BUZZ_PIO			PIOD
-#define BUZZ_PIO_ID			ID_PIOD
-#define BUZZ_PIO_IDX		31
-#define BUZZ_PIO_IDX_MASK	(1u << BUZZ_PIO_IDX)
 
 
 #endif
