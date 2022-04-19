@@ -99,7 +99,7 @@ static void AFEC_pot_Callback(void) {
   adcData adc;
   adc.value = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xQueueSendFromISR(xQueueADC, &adc, &xHigherPriorityTaskWoken);
+  xQueueSendFromISR(xQueueADCProc, &adc, &xHigherPriorityTaskWoken);
 }
 
 /************************************************************************/
@@ -114,7 +114,7 @@ static void task_proc(void *pvParameters){
 	adcData adc;
 	uint amostra[10];
 	int i = 0;
-	double media;
+	int media;
 
 	while (1) {
 		if (xQueueReceive(xQueueADCProc, &(adc), 1000)) {
@@ -128,8 +128,8 @@ static void task_proc(void *pvParameters){
 					soma += amostra[j];
 					}
 			
-				media = (double) soma/10.0;
-				
+				media = soma/10;
+				printf("Media: %d \n", media);
 
 				xQueueSend(xQueueADC, (void *)&media, 10);
 				i = 0;
