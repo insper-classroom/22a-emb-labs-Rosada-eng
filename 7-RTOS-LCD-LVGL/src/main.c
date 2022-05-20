@@ -88,6 +88,31 @@ static void event_handler(lv_event_t *e) {
     }
 }
 
+static void up_handler(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    char *c;
+    int temp;
+    if (code == LV_EVENT_CLICKED) {
+        c = lv_label_get_text(label_ref_temp);
+        temp = atoi(c);
+        temp++;
+        lv_label_set_text_fmt(label_ref_temp, "%02d", temp);
+    }
+}
+
+static void down_handler(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    char *c;
+    int temp;
+    if (code == LV_EVENT_CLICKED) {
+        c = lv_label_get_text(label_ref_temp);
+        temp = atoi(c);
+        temp--;
+        lv_label_set_text_fmt(label_ref_temp, "%02d", temp);
+    }
+}
 void lv_ex_btn_1(void) {
     lv_obj_t *label;
 
@@ -198,7 +223,7 @@ void lv_adjust_clock(void) {
 void lv_btn_down(void) {
     lv_obj_t *label_btn;
     btn_temp_down = lv_btn_create(lv_scr_act());
-    lv_obj_add_event_cb(btn_temp_down, event_handler, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(btn_temp_down, down_handler, LV_EVENT_ALL, NULL);
     lv_obj_align(btn_temp_down, LV_ALIGN_BOTTOM_RIGHT, -10, 0);
 
     label_btn = lv_label_create(btn_temp_down);
@@ -214,7 +239,7 @@ void lv_btn_up(void) {
 
     lv_obj_t *label_btn;
     btn_temp_up = lv_btn_create(lv_scr_act());
-    lv_obj_add_event_cb(btn_temp_up, event_handler, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(btn_temp_up, up_handler, LV_EVENT_ALL, NULL);
     lv_obj_align_to(btn_temp_up, btn_temp_down, LV_ALIGN_OUT_TOP_LEFT, -50, 16);
 
     label_btn = lv_label_create(btn_temp_up);
