@@ -12,6 +12,7 @@
 LV_FONT_DECLARE(dseg70)
 LV_FONT_DECLARE(dseg50)
 LV_FONT_DECLARE(dseg30)
+LV_FONT_DECLARE(dseg20)
 
 LV_FONT_DECLARE(clock26)
 #define MY_CLOCK_SYMBOL "\xEF\x80\x97"
@@ -39,6 +40,22 @@ lv_style_t btn_style;
 // filas
 QueueHandle_t xQueueAnalogicData;
 QueueHandle_t xQueueRealTemp;
+
+// semáforos
+SemaphoreHandle_t xSemaphoreClock;
+
+typedef struct {
+    uint32_t year;
+    uint32_t month;
+    uint32_t day;
+    uint32_t week;
+    uint32_t hour;
+    uint32_t minute;
+    uint32_t second;
+} calendar;
+
+uint32_t current_hour, current_min, current_sec;
+uint32_t current_year, current_month, current_day, current_week;
 /************************************************************************/
 /* LCD / LVGL                                                           */
 /************************************************************************/
@@ -88,10 +105,30 @@ extern void vApplicationMallocFailedHook(void) {
 }
 
 void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq);
+void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type);
 static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel, afec_callback_t callback);
 /************************************************************************/
 /* lvgl                                                                 */
 /************************************************************************/
+void RTC_Handler(void) {
+    uint32_t ul_status = rtc_get_status(RTC);
+
+    /* seccond tick */
+    if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
+        // o c�digo para irq de segundo vem aqui
+        // libera o semáforo para atualizar o relógio
+        BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+        xSemaphoreGiveFromISR(xSemaphoreClock, &xHigherPriorityTaskWoken);
+    }
+
+    rtc_clear_status(RTC, RTC_SCCR_SECCLR);
+    rtc_clear_status(RTC, RTC_SCCR_ALRCLR);
+    rtc_clear_status(RTC, RTC_SCCR_ACKCLR);
+    rtc_clear_status(RTC, RTC_SCCR_TIMCLR);
+    rtc_clear_status(RTC, RTC_SCCR_CALCLR);
+    rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);
+}
+
 static void AFEC_pot_Callback(void) {
     uint32_t analogic_read;
     analogic_read = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
@@ -173,9 +210,8 @@ void lv_ex_btn_1(void) {
 void lv_clock(void) {
 
     label_clock = lv_label_create(lv_scr_act());
-    lv_obj_align(label_clock, LV_ALIGN_TOP_RIGHT, 0, 5);
+    lv_obj_align(label_clock, LV_ALIGN_TOP_RIGHT, -20, 5);
     lv_obj_set_style_text_font(label_clock, &dseg30, LV_STATE_DEFAULT);
-    //<> HARDCODED - temp
     lv_label_set_text_fmt(label_clock, "%02d:%02d", 17, 46);
 }
 
@@ -183,7 +219,6 @@ void lv_ref_termostato(void) {
     label_ref_temp = lv_label_create(lv_scr_act());
     lv_obj_align_to(label_ref_temp, label_clock, LV_ALIGN_OUT_BOTTOM_MID, -5, 30);
     lv_obj_set_style_text_font(label_ref_temp, &dseg50, LV_STATE_DEFAULT);
-    //<> HARDCODED - temp
     lv_label_set_text_fmt(label_ref_temp, "%02d", 22);
 }
 
@@ -192,7 +227,6 @@ void lv_termostato(void) {
     label_floor = lv_label_create(lv_scr_act());
     lv_obj_align(label_floor, LV_ALIGN_LEFT_MID, 35, -25);
     lv_obj_set_style_text_font(label_floor, &dseg70, LV_STATE_DEFAULT);
-    //<> HARDCODED - temp
     lv_label_set_text_fmt(label_floor, "%02d", 23);
 }
 
@@ -201,7 +235,6 @@ void lv_termostato_frac(void) {
     label_floor_frac = lv_label_create(lv_scr_act());
     lv_obj_align_to(label_floor_frac, label_floor, LV_ALIGN_OUT_BOTTOM_RIGHT, 50, -25);
     lv_obj_set_style_text_font(label_floor_frac, &dseg30, LV_STATE_DEFAULT);
-    //<> HARDCODED - temp frac
     lv_label_set_text_fmt(label_floor_frac, ".%1d", 4);
 }
 
@@ -317,12 +350,23 @@ static void task_lcd(void *pvParameters) {
     }
 }
 
-static void task_clock(void *pvParameters) {
-    // init RTC
+void task_clock(void *pvParameters) {
+    uint32_t current_hour, current_min, current_sec;
+    // uint32_t current_year, current_month, current_day, current_week;
+
+    calendar rtc_initial = {2022, 5, 19, 12, 15, 45, 1};
+    RTC_init(RTC, ID_RTC, rtc_initial, RTC_IER_SECEN);
 
     for (;;) {
-        // recebe interrupção do RTC na fila
-        // Aumenta o tempo
+        if (xSemaphoreTake(xSemaphoreClock, portMAX_DELAY) == pdTRUE) {
+            // rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+            rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+            if (current_sec % 2 == 0) {
+                lv_label_set_text_fmt(label_clock, "%02d:%02d", current_hour, current_min);
+            } else {
+                lv_label_set_text_fmt(label_clock, "%02d %02d", current_hour, current_min);
+            }
+        }
     }
 }
 
@@ -338,7 +382,7 @@ void task_analogic(void) {
     uint32_t analogic_read;
     uint32_t amostra[20];
     int count = 0;
-    double media;
+    float media;
 
     for (;;) {
         if (xQueueReceive(xQueueAnalogicData, &analogic_read, 1000)) {
@@ -353,13 +397,13 @@ void task_analogic(void) {
             media = 0.0;
             for (int i = 0; i < count; i++) {
                 printf("%d\n ", amostra[i]);
-                media += (double)amostra[i];
+                media += (float)amostra[i];
             }
             printf("mediu 20 \n");
-            media /= (double)count;
+            media /= (float)count;
             count = 0;
 
-            double new_temp = media * 100 / 4095;
+            float new_temp = media * 100 / 4095;
             printf("T = %f\n", new_temp);
             printf("T(int) = %d\n", (int)new_temp);
 
@@ -484,6 +528,28 @@ void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq) {
     tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
 }
 
+void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type) {
+    /* Configura o PMC */
+    pmc_enable_periph_clk(ID_RTC);
+
+    /* Default RTC configuration, 24-hour mode */
+    rtc_set_hour_mode(rtc, 0);
+
+    /* Configura data e hora manualmente */
+    rtc_set_date(rtc, t.year, t.month, t.day, t.week);
+    rtc_set_time(rtc, t.hour, t.minute, t.second);
+
+    /* Configure RTC interrupts */
+    NVIC_DisableIRQ(id_rtc);
+    NVIC_ClearPendingIRQ(id_rtc);
+    NVIC_SetPriority(id_rtc, 1);
+    NVIC_EnableIRQ(id_rtc);
+
+    /* Ativa interrupcao via alarme */
+    rtc_enable_interrupt(rtc, irq_type);
+    printf("RTC Initialized\n");
+}
+
 static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel,
                             afec_callback_t callback) {
     /*************************************
@@ -557,6 +623,9 @@ int main(void) {
     if (xTaskCreate(task_analogic, "ANLG", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
         printf("Failed to create analogic task\r\n");
     }
+    // SEMÁFOROS
+
+    xSemaphoreClock = xSemaphoreCreateBinary();
 
     // FILAS
     xQueueAnalogicData = xQueueCreate(100, sizeof(uint32_t));
