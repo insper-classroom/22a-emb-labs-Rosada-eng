@@ -12,6 +12,10 @@
 LV_FONT_DECLARE(dseg70)
 LV_FONT_DECLARE(dseg50)
 LV_FONT_DECLARE(dseg30)
+
+LV_FONT_DECLARE(clock26)
+#define MY_CLOCK_SYMBOL "\xEF\x80\x97"
+
 /************************************************************************/
 /* Variáveis Globais                                                    */
 /************************************************************************/
@@ -32,12 +36,19 @@ lv_obj_t *label_ref_temp;
 // global style
 lv_style_t btn_style;
 
+// filas
+QueueHandle_t xQueueAnalogicData;
 /************************************************************************/
 /* LCD / LVGL                                                           */
 /************************************************************************/
 
 #define LV_HOR_RES_MAX (320)
 #define LV_VER_RES_MAX (240)
+
+// Botão analógico de Temperatura (PD30)
+#define AFEC_POT AFEC0
+#define AFEC_POT_ID ID_AFEC0
+#define AFEC_POT_CHANNEL 5 // Canal do pino PD30
 
 /*A static or global variable to store the buffers*/
 static lv_disp_draw_buf_t disp_buf;
@@ -53,6 +64,8 @@ static lv_indev_drv_t indev_drv;
 
 #define TASK_LCD_STACK_SIZE (1024 * 6 / sizeof(portSTACK_TYPE))
 #define TASK_LCD_STACK_PRIORITY (tskIDLE_PRIORITY)
+#define TASK_ANALOGIC_STACK_SIZE (4096 / sizeof(portSTACK_TYPE))
+#define TASK_ANALOGIC_STACK_PRIORITY (tskIDLE_PRIORITY)
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask, signed char *pcTaskName);
 extern void vApplicationIdleHook(void);
@@ -151,6 +164,7 @@ void lv_ref_termostato(void) {
     //<> HARDCODED - temp
     lv_label_set_text_fmt(label_ref_temp, "%02d", 22);
 }
+
 void lv_termostato(void) {
 
     label_floor = lv_label_create(lv_scr_act());
@@ -168,6 +182,7 @@ void lv_termostato_frac(void) {
     //<> HARDCODED - temp frac
     lv_label_set_text_fmt(label_floor_frac, ".%1d", 4);
 }
+
 void lv_power_on_off(void) {
 
     lv_style_init(&btn_style);
@@ -212,10 +227,15 @@ void lv_adjust_clock(void) {
     lv_obj_align_to(btn_clock, btn_menu, LV_ALIGN_OUT_TOP_RIGHT, 20, 16);
 
     label_btn = lv_label_create(btn_clock);
-    lv_label_set_text(label_btn, LV_SYMBOL_SETTINGS " ]");
+    lv_label_set_text(label_btn, MY_CLOCK_SYMBOL);
     lv_obj_center(label_btn);
 
+    lv_obj_t *label_btn2 = lv_label_create(lv_scr_act());
+    lv_label_set_text(label_btn2, " ]");
+    lv_obj_align_to(label_btn2, btn_clock, LV_ALIGN_OUT_RIGHT_MID, 15, 14);
+
     lv_obj_add_style(btn_clock, &btn_style, 0);
+    lv_obj_set_style_text_font(btn_clock, &clock26, LV_STATE_DEFAULT);
     lv_obj_set_width(btn_clock, 60);
     lv_obj_set_height(btn_clock, 60);
 }
@@ -275,10 +295,18 @@ static void task_lcd(void *pvParameters) {
     }
 }
 
+static void task_clock(void *pvParameters) {
+    // init RTC
+
+    for (;;) {
+        // recebe interrupção do RTC na fila
+        // Aumenta o tempo
+    }
+}
+
 /************************************************************************/
 /* configs                                                              */
 /************************************************************************/
-
 static void configure_lcd(void) {
     /**LCD pin configure on SPI*/
     pio_configure_pin(LCD_SPI_MISO_PIO, LCD_SPI_MISO_FLAGS); //
@@ -370,6 +398,11 @@ int main(void) {
     /* Create task to control oled */
     if (xTaskCreate(task_lcd, "LCD", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
         printf("Failed to create lcd task\r\n");
+    }
+
+    /* Create task to control oled */
+    if (xTaskCreate(task_clock, "LCD", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
+        printf("Failed to create timer task\r\n");
     }
 
     /* Start the scheduler. */
