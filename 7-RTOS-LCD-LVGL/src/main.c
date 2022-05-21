@@ -38,6 +38,7 @@ lv_style_t btn_style;
 
 // filas
 QueueHandle_t xQueueAnalogicData;
+QueueHandle_t xQueueRealTemp;
 /************************************************************************/
 /* LCD / LVGL                                                           */
 /************************************************************************/
@@ -45,9 +46,8 @@ QueueHandle_t xQueueAnalogicData;
 #define LV_HOR_RES_MAX (320)
 #define LV_VER_RES_MAX (240)
 
-// Botão analógico de Temperatura (PD30)
-#define AFEC_POT AFEC0
-#define AFEC_POT_ID ID_AFEC0
+#define AFEC_POT AFEC1
+#define AFEC_POT_ID ID_AFEC1
 #define AFEC_POT_CHANNEL 5 // Canal do pino PD30
 
 /*A static or global variable to store the buffers*/
@@ -87,9 +87,30 @@ extern void vApplicationMallocFailedHook(void) {
     configASSERT((volatile void *)NULL);
 }
 
+void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq);
+static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel, afec_callback_t callback);
 /************************************************************************/
 /* lvgl                                                                 */
 /************************************************************************/
+static void AFEC_pot_Callback(void) {
+    uint32_t analogic_read;
+    analogic_read = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
+    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+    xQueueSendFromISR(xQueueAnalogicData, &analogic_read, &xHigherPriorityTaskWoken);
+}
+
+void TC1_Handler(void) {
+    volatile uint32_t ul_dummy;
+
+    ul_dummy = tc_get_status(TC0, 1);
+
+    /* Avoid compiler warning */
+    UNUSED(ul_dummy);
+
+    /* Selecina canal e inicializa conversão */
+    afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
+    afec_start_software_conversion(AFEC_POT);
+}
 
 static void event_handler(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -126,6 +147,7 @@ static void down_handler(lv_event_t *e) {
         lv_label_set_text_fmt(label_ref_temp, "%02d", temp);
     }
 }
+
 void lv_ex_btn_1(void) {
     lv_obj_t *label;
 
@@ -304,6 +326,71 @@ static void task_clock(void *pvParameters) {
     }
 }
 
+void task_analogic(void) {
+    // Init para leitura do ADC
+    config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_Callback);
+
+    // Init do TC
+    TC_init(TC0, ID_TC1, 1, 10);
+    tc_start(TC0, 1);
+
+    // Variáveis para armazenamento
+    uint32_t analogic_read;
+    uint32_t amostra[20];
+    int count = 0;
+    double media;
+
+    for (;;) {
+        if (xQueueReceive(xQueueAnalogicData, &analogic_read, 1000)) {
+            // Guarda o dado lido no vetor amostra
+            // acrescenta o contador
+            amostra[count] = analogic_read;
+            count++;
+        }
+
+        // Calcula média, se o contador for igual a 20
+        if (count == 20) {
+            media = 0.0;
+            for (int i = 0; i < count; i++) {
+                printf("%d\n ", amostra[i]);
+                media += (double)amostra[i];
+            }
+            printf("mediu 20 \n");
+            media /= (double)count;
+            count = 0;
+
+            double new_temp = media * 100 / 4095;
+            printf("T = %f\n", new_temp);
+            printf("T(int) = %d\n", (int)new_temp);
+
+            // Compara nova média com resultado anterior
+            // se a diferença for maior que 0.1, atualiza o valor
+            char *t_int = lv_label_get_text(label_floor);
+            char *t_frac = lv_label_get_text(label_floor_frac);
+
+            int t_int_old = atoi(t_int);
+            int t_frac_old = atoi(t_frac);
+
+            if (new_temp - t_int_old > 1) {
+                t_int_old++;
+                lv_label_set_text_fmt(label_floor, "%02d", t_int_old);
+            } else if (new_temp - t_int_old < -1) {
+                t_int_old--;
+                lv_label_set_text_fmt(label_floor, "%02d", t_int_old);
+            }
+
+            int new_t_frac = ((int)(new_temp * 10)) % 10;
+            if (new_t_frac - t_frac_old > 1) {
+                t_frac_old++;
+                lv_label_set_text_fmt(label_floor_frac, "%.1d", t_frac_old);
+            } else if (new_t_frac - t_frac_old < -1) {
+                t_frac_old--;
+                lv_label_set_text_fmt(label_floor_frac, "%.1d", t_frac_old);
+            }
+        }
+    }
+}
+
 /************************************************************************/
 /* configs                                                              */
 /************************************************************************/
@@ -381,6 +468,67 @@ void configure_lvgl(void) {
     lv_indev_t *my_indev = lv_indev_drv_register(&indev_drv);
 }
 
+void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq) {
+    uint32_t ul_div;
+    uint32_t ul_tcclks;
+    uint32_t ul_sysclk = sysclk_get_cpu_hz();
+
+    pmc_enable_periph_clk(ID_TC);
+
+    tc_find_mck_divisor(freq, ul_sysclk, &ul_div, &ul_tcclks, ul_sysclk);
+    tc_init(TC, TC_CHANNEL, ul_tcclks | TC_CMR_CPCTRG);
+    tc_write_rc(TC, TC_CHANNEL, (ul_sysclk / ul_div) / freq);
+
+    NVIC_SetPriority((IRQn_Type)ID_TC, 4);
+    NVIC_EnableIRQ((IRQn_Type)ID_TC);
+    tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
+}
+
+static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel,
+                            afec_callback_t callback) {
+    /*************************************
+     * Ativa e configura AFEC
+     *************************************/
+    /* Ativa AFEC - 0 */
+    afec_enable(afec);
+
+    /* struct de configuracao do AFEC */
+    struct afec_config afec_cfg;
+
+    /* Carrega parametros padrao */
+    afec_get_config_defaults(&afec_cfg);
+
+    /* Configura AFEC */
+    afec_init(afec, &afec_cfg);
+
+    /* Configura trigger por software */
+    afec_set_trigger(afec, AFEC_TRIG_SW);
+
+    /*** Configuracao específica do canal AFEC ***/
+    struct afec_ch_config afec_ch_cfg;
+    afec_ch_get_config_defaults(&afec_ch_cfg);
+    afec_ch_cfg.gain = AFEC_GAINVALUE_0;
+    afec_ch_set_config(afec, afec_channel, &afec_ch_cfg);
+
+    /*
+    * Calibracao:
+    * Because the internal ADC offset is 0x200, it should cancel it and shift
+    down to 0.
+    */
+    afec_channel_set_analog_offset(afec, afec_channel, 0x200);
+
+    /***  Configura sensor de temperatura ***/
+    struct afec_temp_sensor_config afec_temp_sensor_cfg;
+
+    afec_temp_sensor_get_config_defaults(&afec_temp_sensor_cfg);
+    afec_temp_sensor_set_config(afec, &afec_temp_sensor_cfg);
+
+    /* configura IRQ */
+    afec_set_callback(afec, afec_channel, callback, 1);
+    NVIC_SetPriority(afec_id, 4);
+    NVIC_EnableIRQ(afec_id);
+}
+
 /************************************************************************/
 /* main                                                                 */
 /************************************************************************/
@@ -404,6 +552,15 @@ int main(void) {
     if (xTaskCreate(task_clock, "LCD", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
         printf("Failed to create timer task\r\n");
     }
+
+    /* Create task to control analogic */
+    if (xTaskCreate(task_analogic, "ANLG", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
+        printf("Failed to create analogic task\r\n");
+    }
+
+    // FILAS
+    xQueueAnalogicData = xQueueCreate(100, sizeof(uint32_t));
+    xQueueRealTemp = xQueueCreate(100, sizeof(uint32_t));
 
     /* Start the scheduler. */
     vTaskStartScheduler();
