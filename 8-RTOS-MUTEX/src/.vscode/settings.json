@@ -1,0 +1,7 @@
+{
+  "files.associations": {
+    "*.js": "javascriptreact",
+    "*.vhd": "vhdl",
+    "cstdlib": "c"
+  }
+}
